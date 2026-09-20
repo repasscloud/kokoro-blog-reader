@@ -42,7 +42,8 @@ docker run --rm \
   --speed 1.10
 ```
 
-Because `/work` is the host's current directory, the generated MP3 appears directly in `$PWD`.
+Because `/work` is the host's current directory, the generated
+MP3 appears directly in `$PWD`.
 
 The Hugging Face model cache is persisted in:
 

@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+#
+# Native macOS launcher for kokoro-blog-reader.py.
+#
+# On first run (or whenever requirements.txt changes) it creates .venv in the
+# repo root, upgrades pip and installs requirements.txt. It then points the
+# Hugging Face cache at ./.cache/huggingface or ~/.cache/huggingface and runs
+# the Python script with whatever arguments were passed:
+#
+#   kokoro-blog-reader article.md article.mp3 --voice bm_fable --speed 1.10
+#
+# Environment overrides:
+#   HF_HOME          Use this Hugging Face cache instead of auto-detecting.
+#   KOKORO_PYTHON    Python interpreter used to create the venv.
+#
+# Written for the macOS system bash (3.2), so no bash 4+ features.
+
+set -euo pipefail
+
+log() { printf '[kokoro-blog-reader] %s\n' "$*" >&2; }
+die() { log "Error: $*"; exit 1; }
+
+# Native runs are Apple Silicon macOS only: current PyTorch has no Intel macOS
+# wheels. Everything else should use the Docker image.
+case "$(uname -s)" in
+    Darwin) ;;
+    *) die "this launcher only supports macOS; on $(uname -s) use the Docker image (see README.md)" ;;
+esac
+if [ "$(uname -m)" != "arm64" ]; then
+    if [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = "1" ]; then
+        die "running under Rosetta (x86_64); re-run from a native arm64 shell"
+    fi
+    die "this launcher needs an Apple Silicon Mac; on Intel Macs use the Docker image"
+fi
+
+# Resolve the real script location so this works when symlinked onto PATH,
+# e.g. ln -s "$PWD/kokoro-blog-reader" /opt/homebrew/bin/kokoro-blog-reader
+resolve_script_dir() {
+    local src="${BASH_SOURCE[0]}" dir
+    while [ -L "$src" ]; do
+        dir="$(cd -P "$(dirname "$src")" && pwd)"
+        src="$(readlink "$src")"
+        case "$src" in /*) ;; *) src="$dir/$src" ;; esac
+    done
+    cd -P "$(dirname "$src")" && pwd
+}
+
+REPO_ROOT="$(resolve_script_dir)"
+VENV_DIR="$REPO_ROOT/.venv"
+VENV_PY="$VENV_DIR/bin/python"
+REQUIREMENTS="$REPO_ROOT/requirements.txt"
+STAMP="$VENV_DIR/.requirements.sha256"
+APP="$REPO_ROOT/kokoro-blog-reader.py"
+
+[ -f "$APP" ] || die "cannot find $APP"
+[ -f "$REQUIREMENTS" ] || die "cannot find $REQUIREMENTS"
+
+# Kokoro supports Python >=3.10,<3.13. Homebrew's default python3 is often
+# newer than that, so look for a compatible versioned interpreter first.
+python_is_compatible() {
+    "$1" -c 'import sys; sys.exit(0 if (3, 10) <= sys.version_info[:2] < (3, 13) else 1)' \
+        >/dev/null 2>&1
+}
+
+find_python() {
+    local candidate
+    if [ -n "${KOKORO_PYTHON:-}" ]; then
+        python_is_compatible "$KOKORO_PYTHON" \
+            || die "KOKORO_PYTHON=$KOKORO_PYTHON is not Python 3.10-3.12"
+        echo "$KOKORO_PYTHON"
+        return
+    fi
+    for candidate in python3.12 python3.11 python3.10 python3; do
+        if command -v "$candidate" >/dev/null 2>&1 && python_is_compatible "$candidate"; then
+            command -v "$candidate"
+            return
+        fi
+    done
+    die "Kokoro needs Python 3.10-3.12. Install one with: brew install python@3.12"
+}
+
+requirements_hash() {
+    shasum -a 256 "$REQUIREMENTS" | awk '{print $1}'
+}
+
+setup_venv() {
+    local python
+    if [ ! -x "$VENV_PY" ] || ! python_is_compatible "$VENV_PY"; then
+        python="$(find_python)"
+        log "Creating virtualenv in $VENV_DIR using $python ($("$python" --version 2>&1))"
+        rm -rf "$VENV_DIR"
+        "$python" -m venv "$VENV_DIR"
+    fi
+
+    log "Upgrading pip"
+    "$VENV_PY" -m pip install --quiet --upgrade pip
+
+    log "Installing $REQUIREMENTS"
+    "$VENV_PY" -m pip install --quiet -r "$REQUIREMENTS"
+
+    requirements_hash > "$STAMP"
+    log "Environment ready"
+}
+
+if [ ! -x "$VENV_PY" ] || [ ! -f "$STAMP" ] || [ "$(cat "$STAMP")" != "$(requirements_hash)" ]; then
+    setup_venv
+fi
+
+command -v ffmpeg >/dev/null 2>&1 || die "ffmpeg not found on PATH. Install it with: brew install ffmpeg"
+
+# Prefer a repo-local cache (same layout the Docker instructions use), then the
+# standard per-user cache. HF_HOME/hub is where model snapshots live.
+if [ -z "${HF_HOME:-}" ]; then
+    if [ -d "$REPO_ROOT/.cache/huggingface" ]; then
+        HF_HOME="$REPO_ROOT/.cache/huggingface"
+    elif [ -d "$HOME/.cache/huggingface" ]; then
+        HF_HOME="$HOME/.cache/huggingface"
+    else
+        HF_HOME="$HOME/.cache/huggingface"
+        mkdir -p "$HF_HOME"
+    fi
+fi
+export HF_HOME
+log "Hugging Face cache: $HF_HOME"
+
+exec "$VENV_PY" "$APP" "$@"

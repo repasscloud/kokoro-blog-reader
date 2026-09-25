@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import logging
 import os
 import re
 import subprocess
@@ -25,9 +26,11 @@ warnings.filterwarnings(
     message=r"`torch\.jit\.script` is deprecated.*",
     category=FutureWarning,
 )
-warnings.filterwarnings(
-    "ignore",
-    message=r"You are sending unauthenticated requests to the HF Hub.*",
+
+# The HF Hub sends this as an X-HF-Warning response header, which
+# huggingface_hub logs rather than raising through the warnings module.
+logging.getLogger("huggingface_hub.utils._http").addFilter(
+    lambda record: "unauthenticated requests to the HF Hub" not in record.getMessage()
 )
 
 os.environ.setdefault("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")

@@ -1,5 +1,34 @@
 # Kokoro Blog Reader
 
+## Native macOS
+
+Requires an Apple Silicon Mac, Homebrew `ffmpeg` and a Python 3.10–3.12
+interpreter (`brew install ffmpeg python@3.12`). On Linux or Intel Macs,
+use Docker instead.
+
+```bash
+./kokoro-blog-reader \
+  article.md article.mp3 \
+  --voice bm_fable \
+  --speed 1.10
+```
+
+The first run creates `.venv` in the repo root, upgrades pip and installs
+`requirements.txt`. That repeats automatically whenever
+`requirements.txt` changes; delete `.venv` to force a rebuild.
+
+The Hugging Face cache is `./.cache/huggingface` if it exists, otherwise
+`~/.cache/huggingface`. Set `HF_HOME` to override. Set `KOKORO_PYTHON` to
+pick a specific interpreter.
+
+To call it from anywhere, symlink it onto your `PATH`:
+
+```bash
+ln -s "$PWD/kokoro-blog-reader" /opt/homebrew/bin/kokoro-blog-reader
+```
+
+## Docker
+
 Build:
 
 ```bash
@@ -49,4 +78,17 @@ The Hugging Face model cache is persisted in:
 
 ```text
 $PWD/.cache/huggingface
+```
+
+On a Linux host, add `--user "$(id -u):$(id -g)"` so the MP3 and cache
+files are owned by you rather than root:
+
+```bash
+docker run --rm \
+  --user "$(id -u):$(id -g)" \
+  -v "$PWD:/work" \
+  -v "$PWD/.cache/huggingface:/root/.cache/huggingface" \
+  kokoro-blog-reader \
+  article.md article.mp3 \
+  --voice bm_fable
 ```

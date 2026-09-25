@@ -5,6 +5,33 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.2.0] - 2026-09-25
+
+### Added
+
+- `kokoro-blog-reader` launcher for running natively on Apple Silicon macOS.
+  It creates `.venv`, installs `requirements.txt`, and uses
+  `./.cache/huggingface` or `~/.cache/huggingface` as the model cache.
+  It exits with an error on any other OS or architecture.
+- `requirements.txt` with pinned top-level dependencies, shared by the
+  Docker image and the native launcher.
+- The Docker image supports `docker run --user` for non-root hosts.
+
+### Changed
+
+- The Docker image now installs from `requirements.txt` on a
+  `python:3.12-slim-trixie` base. The spaCy `en_core_web_sm` model is
+  baked in, so containers no longer download it on every run.
+- Removed the APT `espeak-ng` package. Kokoro uses the copy bundled in the
+  `espeakng-loader` wheel.
+
+### Fixed
+
+- The "unauthenticated requests to the HF Hub" message is now actually
+  suppressed.
+
 ## [1.1.0] - 2026-09-20
 
 ### Added
@@ -27,12 +54,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `manifest`) instead of one, so tag validation runs once and each
   architecture builds independently.
 
-## [0.1.0] - 2026-09-16
+## [1.0.0] - 2026-09-16
 
 ### Added
 
 - Initial release
 
-[Unreleased]: https://github.com/repasscloud/kokoro-blog-reader/compare/v1.1.0...main
+[Unreleased]: https://github.com/repasscloud/kokoro-blog-reader/compare/v1.2.0...main
+[1.2.0]: https://github.com/repasscloud/kokoro-blog-reader/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/repasscloud/kokoro-blog-reader/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/repasscloud/kokoro-blog-reader/releases/tag/v1.0.0

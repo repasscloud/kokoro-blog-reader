@@ -1,47 +1,52 @@
-FROM python:3.12-slim
+# syntax=docker/dockerfile:1
 
-ENV DEBIAN_FRONTEND=noninteractive \
-    TZ=Australia/Sydney \
+FROM python:3.12-slim-trixie
+
+LABEL org.opencontainers.image.title="kokoro-blog-reader" \
+      org.opencontainers.image.description="Narrate Markdown articles to MP3 with Kokoro TTS" \
+      org.opencontainers.image.source="https://github.com/repasscloud/kokoro-blog-reader"
+
+ENV TZ=Australia/Sydney \
     PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    PIP_ROOT_USER_ACTION=ignore \
+    HF_HOME=/root/.cache/huggingface
 
-# Install only required runtime OS packages, then remove all APT metadata/cache.
+# Runtime OS packages only. espeak-ng isn't needed from APT: Kokoro's
+# fallback phonemizer loads the copy bundled in the espeakng-loader wheel.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        espeak-ng \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         ffmpeg \
         tzdata \
-    && apt-get clean \
-    && rm -rf \
-        /var/lib/apt/lists/* \
-        /var/cache/apt/* \
-        /var/log/apt/*
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/* /var/log/apt/*
 
-# Install CPU-only PyTorch first so Kokoro cannot pull CUDA/NVIDIA/Triton.
-#
-# PIP_NO_CACHE_DIR=1 prevents pip from retaining downloaded wheels.
-#
-# Remove PyTorch development/test content and Python bytecode/cache files
-# that aren't required for Kokoro inference.
+COPY requirements.txt /tmp/requirements.txt
+
+# Install the pinned torch from the CPU-only index first so Kokoro cannot pull
+# CUDA/NVIDIA/Triton; the second install then sees torch as already satisfied.
+# Afterwards, drop PyTorch headers/tests and bytecode caches that inference
+# doesn't need.
 RUN python -m pip install --upgrade pip \
     && python -m pip install \
         --index-url https://download.pytorch.org/whl/cpu \
-        torch \
-    && python -m pip install \
-        kokoro \
-        soundfile \
-        numpy \
+        "$(grep -E '^torch==' /tmp/requirements.txt)" \
+    && python -m pip install -r /tmp/requirements.txt \
+    && SITE_PACKAGES="$(python -c 'import sysconfig; print(sysconfig.get_path("purelib"))')" \
     && rm -rf \
-        /usr/local/lib/python3.12/site-packages/torch/test \
-        /usr/local/lib/python3.12/site-packages/torch/include \
+        "$SITE_PACKAGES/torch/test" \
+        "$SITE_PACKAGES/torch/include" \
+        /tmp/requirements.txt \
         /root/.cache/pip \
-    && find /usr/local/lib/python3.12/site-packages \
-        -type d -name '__pycache__' \
-        -prune -exec rm -rf '{}' + \
-    && find /usr/local/lib/python3.12/site-packages \
-        -type f \( -name '*.pyc' -o -name '*.pyo' \) \
-        -delete
+    && find "$SITE_PACKAGES" -type d -name '__pycache__' -prune -exec rm -rf '{}' + \
+    && find "$SITE_PACKAGES" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
+
+# Let the image run as a non-root host user (docker run --user) while keeping
+# the documented /root/.cache/huggingface mount point.
+RUN mkdir -p "$HF_HOME" \
+    && chmod 755 /root /root/.cache \
+    && chmod 1777 "$HF_HOME"
 
 WORKDIR /work
 
